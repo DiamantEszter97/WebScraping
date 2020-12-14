@@ -1,0 +1,140 @@
+---
+title: "SimpleJob.com"
+author: "Eszter Diamant"
+date: '2020 12 14 '
+output:  
+  prettydoc::html_pretty:
+    theme: cayman
+    highlight: github
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+
+rm(list=ls())
+library(rvest)
+library(jsonlite)
+library(data.table)
+library(tidyverse)
+library(ggplot2)
+library(dplyr)
+```
+
+## Introduction
+
+Simplejob.com is a job offering website in Hungary that is linked to the Simple product family providing services connected to mostly banking and administration duties. I have chosen this website because I was curious how many positions they can offer from which companies. Therefore, during webscraping I have downloaded not only the job offerings but also data about the companies.
+
+## Let's begin
+
+As a begining, I have tried to copy the cURL but I have met many issues therefore I decided to use only JSON. During the inspection, I have located the JSON and used the xpath to get the JSON. After that, I ungrouped the JSON and loaded the data in two different table: one contains the data about the job offerings, the other has the data from the companies.
+
+```{r, include = TRUE, results = TRUE}
+# add link for simplejob.com
+website <- "https://simplejob.com/search/all?"
+
+# save html
+t <- read_html(website)
+write_html(t, "t.html")
+
+# get the JSON
+job_list <- fromJSON(
+t %>%
+  html_nodes(xpath = "//script[@type='application/json']") %>%
+  html_text())
+
+# unbox the JSON
+toJSON(job_list, auto_unbox = T)
+
+# load data into dataset 
+job_df <- job_list$props$pageProps$jobsPageData$data$positions
+company_df <- job_list$props$pageProps$jobs$company
+
+
+```
+
+## Cleaning the data
+
+As the next step, I have checked the data about the job offerings where the categories (which was renamed from url_slug) were not separated from each other. The separate_rows function solved the problem but it also separated expressions that contained space. I have deleted the unnecessary rows and rename the wrongly separated cells. Also, url_slug and type column was excluded from the table.
+
+In the company table, I have dropped those columns that contained garbage data and deleted duplicates. 
+
+```{r, include = TRUE, results = TRUE}
+
+
+
+###### some cleaning in job_df:
+
+job_df <- separate_rows(job_df,url_slug, convert = T)
+job_df <- job_df %>% mutate("Category" = url_slug)
+job_df <- job_df %>%  select(-c(url_slug, type))
+
+# drop unnassacry categories:
+job_df <- job_df %>% subset(Category != "allasok" & Category != "munkas" & Category != "konyhai" & Category != "center" & Category != "ugyintezo" & Category != "munkak" & Category != "munkatars" & Category != "szelli" & Category != "munka" & Category != "allas" & Category != "allasok" & Category != "egyeb" & Category != "instruktor" & Category != "fizikai")
+
+# rename some categories
+job_df$Category <- gsub("kisegito", "konyhai kisegito", job_df$Category)
+job_df$Category <- gsub("call", "call-center", job_df$Category)
+job_df$Category <- gsub("logisztikai", "logisztikai ugyintezo", job_df$Category)
+job_df$Category <- gsub("raktarvezeto", "raktarvezeto helyettes", job_df$Category)
+job_df$Category <- gsub("szakmunkak", "egyeb szakmunkak", job_df$Category)
+job_df$Category <- gsub("fitness", "fitness instruktor", job_df$Category)
+job_df$Category <- gsub("konnyu", "konnyu fizikai", job_df$Category)
+
+# View(job_df)
+
+
+####### some cleaning
+# selecting necassary columns:
+company_df <- company_df %>% select(c(company_id_ai, active_followers, name, introduction, motto, web, facebook, instagram, video_url, count_active_job_offers, url_slug))
+company_df <- company_df %>% distinct()
+```
+
+## Job offerings
+
+The data contained many one job offer by category making the visalization pretty messy, so I have decided to check how many has greater than one. As a result, the top offerings are for students. 
+
+
+```{r, include = TRUE, results = TRUE}
+# select the highest number of listings in categories:
+frequency_job <- job_df %>% group_by(Category) %>% count(Category)
+
+# select categories where the frequency is higher than 1
+frequency_job <- filter(frequency_job, n > 1 )
+
+# View(frequency_job)
+
+# visualize the frequencies
+ggplot(frequency_job, aes(x = reorder(Category, -n), y = n)) +
+  geom_bar(stat = 'identity', fill = 'red') +
+  labs(x = "Category Name", y = "Frequency") +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+```
+
+
+## Companies
+
+The data collected about the companies had dimensions to present. For visualizing which companies have active followers, I have dropped which did not have any. In the case of active job offers, there was no need to any further filtering. It turned out, that Rossman Inc. has the most followers while Bonafarm csoport the most job offerings actively.
+
+```{r, include = TRUE, results = TRUE}
+summary_comp_foll <- company_df %>% select(c(active_followers, name, count_active_job_offers))
+# View(summary_comp_foll)
+
+# select most nessacary columns for visualization and exclude companies with 0 followers
+company_active_foll <- summary_comp_foll %>%  filter(active_followers > 0)
+
+# visualization of company and their number of followers
+ggplot(company_active_foll, aes(x = reorder(name, -active_followers), y = active_followers)) +
+  geom_bar(stat = 'identity', fill = 'Orange') +
+  labs(x = "Company Name", y = "Number of active followers") +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+
+# visualization of actibe job offers by companies
+ggplot(company_active_foll, aes(x = reorder(name, -count_active_job_offers), y = count_active_job_offers)) +
+         geom_bar(stat = 'identity', fill = 'gold') +
+        labs(x = "Company name", y = "Number of active job offerings") +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+```
+
+## Summary:
+
+To sum up, for the webscraping process, JSON, and through that, xpath was used for accessing the required data. As a result, SimpleJob.com provides a wide range of jobs but mostly for students witha total of 4 advertisement. Among the companies, Rossmann Inc. possesses the highest number of followers while Bonafarms Csoport provides the highest number of job offering.
